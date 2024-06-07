@@ -1,23 +1,26 @@
 import socket
 import struct
 
+# Constants for message types
+MESSAGE_TYPE_REQUEST_SUBSCRIPTION = 0
+MESSAGE_TYPE_REQUEST = 1
+MESSAGE_TYPE_ERROR = 2
+MESSAGE_TYPE_OK = 3
+
 # Function to send a message with header
-def send_message(client_socket, message_type, message):
+def send_message(client_socket, message_type, am, message):
     message_length = len(message)
-    header = struct.pack('!I', message_length)
-    client_socket.sendall(header)
-    client_socket.sendall(message_type.encode())
-    client_socket.sendall(message.encode())
+    header = struct.pack('!HHI', message_type, am, message_length)
+    client_socket.sendall(header + message.encode())
 
 # Function to receive a message with header
 def receive_message(client_socket):
-    header = client_socket.recv(4)
+    header = client_socket.recv(8)
     if not header:
-        return None, None
-    message_length = struct.unpack('!I', header)[0]
-    message_type = client_socket.recv(1).decode()
+        return None, None, None
+    message_type, am, message_length = struct.unpack('!HHI', header)
     message = client_socket.recv(message_length).decode()
-    return message_type, message
+    return message_type, am, message
 
 def main():
     server_address = ("localhost", 54541)
@@ -26,21 +29,23 @@ def main():
 
     # Client identification
     am = input("Enter your identification (AM): ")
-    send_message(client_socket, "I", am)
+    send_message(client_socket, MESSAGE_TYPE_REQUEST_SUBSCRIPTION, int(am), "Request Subscription")
 
     # Receive and send information requests
     while True:
-        message_type, request = receive_message(client_socket)
-        if message_type == "O":
+        message_type, am, request = receive_message(client_socket)
+        if message_type == MESSAGE_TYPE_OK:
             print("Subscription successful!")
             break
-        elif message_type == "E":
-            print("Server error:", request)
-            break
-        else:
+        elif message_type == MESSAGE_TYPE_ERROR:
+            print("Server:", request)
+            if request != "Previous information needed":
+                info = input("Enter {}: ".format(request))
+                send_message(client_socket, MESSAGE_TYPE_REQUEST, am, info)
+        elif message_type == MESSAGE_TYPE_REQUEST:
             print("Server request:", request)
             info = input("Enter {}: ".format(request))
-            send_message(client_socket, "D", info)
+            send_message(client_socket, MESSAGE_TYPE_REQUEST, am, info)
 
     client_socket.close()
 

@@ -2,6 +2,12 @@ import socket
 import random
 import struct
 
+# Constants for message types
+MESSAGE_TYPE_REQUEST_SUBSCRIPTION = 0
+MESSAGE_TYPE_REQUEST = 1
+MESSAGE_TYPE_ERROR = 2
+MESSAGE_TYPE_OK = 3
+
 # Function to generate a random order of information requests
 def generate_random_order():
     info_order = ["Full Name", "Corresponding Address", "Telephone Number"]
@@ -29,31 +35,28 @@ def validate_address(address):
     return len(parts) == 3 and all(part.strip() for part in parts)
 
 # Function to send a message with header
-def send_message(client_socket, message_type, message):
+def send_message(client_socket, message_type, am, message):
     message_length = len(message)
-    header = struct.pack('!I', message_length)
-    client_socket.sendall(header)
-    client_socket.sendall(message_type.encode())
-    client_socket.sendall(message.encode())
+    header = struct.pack('!HHI', message_type, am, message_length)
+    client_socket.sendall(header + message.encode())
 
 # Function to receive a message with header
 def receive_message(client_socket):
-    header = client_socket.recv(4)
+    header = client_socket.recv(8)
     if not header:
-        return None, None
-    message_length = struct.unpack('!I', header)[0]
-    message_type = client_socket.recv(1).decode()
+        return None, None, None
+    message_type, am, message_length = struct.unpack('!HHI', header)
     message = client_socket.recv(message_length).decode()
-    return message_type, message
+    return message_type, am, message
 
 # Function to handle client connections
 def handle_client_connection(client_socket, client_address):
     print("Connection from:", client_address)
     
-    # Client identification
-    message_type, am = receive_message(client_socket)
-    if not validate_am(am):
-        send_message(client_socket, "E", "Invalid AM")
+    # Receive client identification
+    message_type, am, _ = receive_message(client_socket)
+    if message_type != MESSAGE_TYPE_REQUEST_SUBSCRIPTION or not validate_am(str(am).zfill(5)):
+        send_message(client_socket, MESSAGE_TYPE_ERROR, am, "Invalid AM")
         client_socket.close()
         print("Error found: Invalid AM")
         return
@@ -64,34 +67,34 @@ def handle_client_connection(client_socket, client_address):
     # Request and validate information from client
     prev_info = None
     for info in info_order:
-        send_message(client_socket, "R", info)
-        message_type, response = receive_message(client_socket)
+        send_message(client_socket, MESSAGE_TYPE_REQUEST, am, info)
+        message_type, _, response = receive_message(client_socket)
         print(info + ":", response)
 
         # Validate client's response
         if info == "Full Name" and not validate_full_name(response):
-            send_message(client_socket, "E", "Invalid Full Name")
+            send_message(client_socket, MESSAGE_TYPE_ERROR, am, "Invalid Full Name")
             print("Error found: Invalid Full Name")
             if prev_info:
-                send_message(client_socket, "R", prev_info)
+                send_message(client_socket, MESSAGE_TYPE_REQUEST, am, prev_info)
                 continue
             else:
                 client_socket.close()
                 return
         elif info == "Telephone Number" and not validate_phone_number(response):
-            send_message(client_socket, "E", "Invalid Phone Number")
+            send_message(client_socket, MESSAGE_TYPE_ERROR, am, "Invalid Phone Number")
             print("Error found: Invalid Phone Number")
             if prev_info:
-                send_message(client_socket, "R", prev_info)
+                send_message(client_socket, MESSAGE_TYPE_REQUEST, am, prev_info)
                 continue
             else:
                 client_socket.close()
                 return
         elif info == "Corresponding Address" and not validate_address(response):
-            send_message(client_socket, "E", "Invalid Address")
+            send_message(client_socket, MESSAGE_TYPE_ERROR, am, "Invalid Address")
             print("Error found: Invalid Address")
             if prev_info:
-                send_message(client_socket, "R", prev_info)
+                send_message(client_socket, MESSAGE_TYPE_REQUEST, am, prev_info)
                 continue
             else:
                 client_socket.close()
@@ -100,7 +103,7 @@ def handle_client_connection(client_socket, client_address):
         prev_info = response
 
     # Send OK response and close connection
-    send_message(client_socket, "O", "OK")
+    send_message(client_socket, MESSAGE_TYPE_OK, am, "OK")
     client_socket.close()
     print("Connection closed with:", client_address)
 
